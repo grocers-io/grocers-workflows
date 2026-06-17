@@ -31,6 +31,11 @@ on:
         description: "ARN da role OIDC para autenticação na AWS"
         required: true
         type: string
+      gitops-file:
+        description: "Nome do arquivo yaml no gitops (sem .yaml). Padrão: ecr-repository"
+        required: false
+        type: string
+        default: ""
     secrets:
       GH_TOKEN:
         required: true
@@ -79,12 +84,14 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
+          GITOPS_FILE="${{ inputs.gitops-file }}"
+          GITOPS_FILE="${GITOPS_FILE:-${{ inputs.ecr-repository }}}"
           git clone https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/grocers-io/gitops.git
           cd gitops
-          sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
+          sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/$GITOPS_FILE.yaml
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
-          git commit -m "chore: update ${{ inputs.ecr-repository }} to $VERSION [skip ci]"
+          git add apps/us-east-1/${{ inputs.gitops-env }}/$GITOPS_FILE.yaml
+          git commit -m "chore: update $GITOPS_FILE to $VERSION [skip ci]"
           git pull --rebase origin main
           git push
