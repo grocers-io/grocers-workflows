@@ -1,0 +1,45 @@
+name: Deploy
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "GitHub environment name (hml ou prd)"
+        required: true
+        type: string
+      ecr-repository:
+        description: "Nome do repositório no ECR"
+        required: true
+        type: string
+      gitops-env:
+        description: "Pasta do ambiente no gitops (homolog ou production)"
+        required: true
+        type: string
+      version:
+        description: "Versão da imagem a ser deployada"
+        required: true
+        type: string
+    secrets:
+      GITOPS_TOKEN:
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+
+    steps:
+      - name: Update gitops manifest
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/grocers-io/gitops.git
+          cd gitops
+          sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
+          git commit -m "chore: update ${{ inputs.ecr-repository }} to $VERSION [skip ci]"
+          git pull --rebase origin main
+          git push

@@ -25,101 +25,26 @@ on:
 
 jobs:
   release:
-    name: Release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      issues: write
-      pull-requests: write
-    outputs:
-      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
-      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Write .releaserc
-        run: |
-          cat > .releaserc << 'EOF'
-          {
-            "branches": ["main"],
-            "plugins": [
-              ["@semantic-release/commit-analyzer", {
-                "preset": "angular",
-                "releaseRules": [
-                  {"type": "refactor", "release": "patch"},
-                  {"scope": "no-release", "release": false}
-                ]
-              }],
-              "@semantic-release/release-notes-generator",
-              "@semantic-release/github"
-            ]
-          }
-          EOF
-
-      - name: Semantic Release
-        id: semantic
-        uses: cycjimmy/semantic-release-action@v4
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
+    uses: grocers-io/grocers-workflows/.github/workflows/release.yml@main
 
   build:
-    name: Build
     needs: release
     if: needs.release.outputs.new_release_published == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-    permissions:
-      id-token: write
-      contents: read
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
-          aws-region: ${{ vars.AWS_REGION }}
-
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Build Docker image
-        run: |
-          docker build \
-            -t ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}:${{ needs.release.outputs.new_release_version }} \
-            --build-arg ENVIRONMENT=${{ inputs.build-env }} \
-            .
-
-      - name: Push Docker image to ECR
-        run: |
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}:${{ needs.release.outputs.new_release_version }}
+    uses: grocers-io/grocers-workflows/.github/workflows/build.yml@main
+    with:
+      environment: ${{ inputs.environment }}
+      ecr-repository: ${{ inputs.ecr-repository }}
+      build-env: ${{ inputs.build-env }}
+      version: ${{ needs.release.outputs.new_release_version }}
 
   deploy:
-    name: Deploy
     needs: [release, build]
     if: needs.release.outputs.new_release_published == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.environment }}
-
-    steps:
-      - name: Update gitops manifest
-        env:
-          VERSION: ${{ needs.release.outputs.new_release_version }}
-        run: |
-          git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/grocers-io/gitops.git
-          cd gitops
-          sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git add apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
-          git commit -m "chore: update ${{ inputs.ecr-repository }} to $VERSION [skip ci]"
-          git pull --rebase origin main
-          git push
+    uses: grocers-io/grocers-workflows/.github/workflows/deploy.yml@main
+    with:
+      environment: ${{ inputs.environment }}
+      ecr-repository: ${{ inputs.ecr-repository }}
+      gitops-env: ${{ inputs.gitops-env }}
+      version: ${{ needs.release.outputs.new_release_version }}
+    secrets:
+      GITOPS_TOKEN: ${{ secrets.GITOPS_TOKEN }}
