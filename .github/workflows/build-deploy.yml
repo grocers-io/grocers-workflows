@@ -24,7 +24,7 @@ on:
         required: true
         type: string
     secrets:
-      GITOPS_TOKEN:
+      GH_TOKEN:
         required: true
 
 jobs:
@@ -71,7 +71,7 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
-          git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/grocers-io/gitops.git
+          git clone https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/grocers-io/gitops.git
           cd gitops
           sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
           git config user.email "github-actions[bot]@users.noreply.github.com"
