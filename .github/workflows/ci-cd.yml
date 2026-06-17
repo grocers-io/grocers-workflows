@@ -42,6 +42,25 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Write .releaserc
+        run: |
+          cat > .releaserc << 'EOF'
+          {
+            "branches": ["main"],
+            "plugins": [
+              ["@semantic-release/commit-analyzer", {
+                "preset": "angular",
+                "releaseRules": [
+                  {"type": "refactor", "release": "patch"},
+                  {"scope": "no-release", "release": false}
+                ]
+              }],
+              "@semantic-release/release-notes-generator",
+              "@semantic-release/github"
+            ]
+          }
+          EOF
+
       - name: Semantic Release
         id: semantic
         uses: cycjimmy/semantic-release-action@v4
