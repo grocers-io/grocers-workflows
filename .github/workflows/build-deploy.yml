@@ -1,4 +1,4 @@
-name: Deploy
+name: Build and Deploy
 
 on:
   workflow_call:
@@ -15,8 +15,12 @@ on:
         description: "Pasta do ambiente no gitops (homolog ou production)"
         required: true
         type: string
+      build-env:
+        description: "Valor do build arg ENVIRONMENT no Docker"
+        required: true
+        type: string
       version:
-        description: "Versão da imagem a ser deployada"
+        description: "Tag gerada pelo release (ex: v1.0.0)"
         required: true
         type: string
     secrets:
@@ -24,16 +28,49 @@ on:
         required: true
 
 jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        run: |
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          docker build \
+            -t ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}:$VERSION \
+            --build-arg ENVIRONMENT=${{ inputs.build-env }} \
+            .
+          docker push ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}:$VERSION
+
   deploy:
     name: Deploy
+    needs: build
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
 
     steps:
       - name: Update gitops manifest
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
           git clone https://x-access-token:${{ secrets.GITOPS_TOKEN }}@github.com/grocers-io/gitops.git
           cd gitops
           sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/${{ inputs.ecr-repository }}.yaml
