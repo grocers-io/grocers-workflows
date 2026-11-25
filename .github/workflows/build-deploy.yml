@@ -37,7 +37,9 @@ on:
         type: string
         default: ""
     secrets:
-      GH_TOKEN:
+      GITOPS_APP_ID:
+        required: true
+      GITOPS_APP_PRIVATE_KEY:
         required: true
 
 jobs:
@@ -80,13 +82,25 @@ jobs:
     environment: ${{ inputs.environment }}
 
     steps:
+      - name: Generate gitops token
+        id: gitops-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.GITOPS_APP_ID }}
+          private-key: ${{ secrets.GITOPS_APP_PRIVATE_KEY }}
+          owner: grocers-io
+          repositories: gitops
+          permission-contents: write
+
       - name: Update gitops manifest
+        env:
+          GITOPS_TOKEN: ${{ steps.gitops-token.outputs.token }}
         run: |
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
           GITOPS_FILE="${{ inputs.gitops-file }}"
           GITOPS_FILE="${GITOPS_FILE:-${{ inputs.ecr-repository }}}"
-          git clone https://x-access-token:${{ secrets.GH_TOKEN }}@github.com/grocers-io/gitops.git
+          git clone "https://x-access-token:${GITOPS_TOKEN}@github.com/grocers-io/gitops.git"
           cd gitops
           sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/$GITOPS_FILE.yaml
           git config user.email "github-actions[bot]@users.noreply.github.com"
