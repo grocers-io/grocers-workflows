@@ -32,10 +32,25 @@ on:
         required: true
         type: string
       gitops-file:
-        description: "Nome do arquivo yaml no gitops (sem .yaml). Padrão: ecr-repository"
+        description: "Arquivos yaml no gitops (sem .yaml), separados por espaço. Padrão: ecr-repository"
         required: false
         type: string
         default: ""
+      dockerfile:
+        description: "Caminho do Dockerfile"
+        required: false
+        type: string
+        default: "Dockerfile"
+      build-args:
+        description: "Build args extras do Docker, um NOME=valor por linha"
+        required: false
+        type: string
+        default: ""
+      deploy:
+        description: "Grava a tag no gitops depois do build"
+        required: false
+        type: boolean
+        default: true
     secrets:
       GITOPS_APP_ID:
         required: true
@@ -66,18 +81,25 @@ jobs:
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Build and push Docker image
+        env:
+          IMAGE: ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}
+          DOCKERFILE: ${{ inputs.dockerfile }}
+          BUILD_ENV: ${{ inputs.build-env }}
+          EXTRA_BUILD_ARGS: ${{ inputs.build-args }}
         run: |
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
-          docker build \
-            -t ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}:$VERSION \
-            --build-arg ENVIRONMENT=${{ inputs.build-env }} \
-            .
-          docker push ${{ steps.login-ecr.outputs.registry }}/${{ inputs.ecr-repository }}:$VERSION
+          BUILD_ARGS=(--build-arg "ENVIRONMENT=$BUILD_ENV")
+          while IFS= read -r line; do
+            [ -n "$line" ] && BUILD_ARGS+=(--build-arg "$line")
+          done <<< "$EXTRA_BUILD_ARGS"
+          docker build -t "$IMAGE:$VERSION" -f "$DOCKERFILE" "${BUILD_ARGS[@]}" .
+          docker push "$IMAGE:$VERSION"
 
   deploy:
     name: Deploy
     needs: build
+    if: ${{ inputs.deploy }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.environment }}
 
@@ -98,14 +120,17 @@ jobs:
         run: |
           VERSION="${{ inputs.version }}"
           VERSION="${VERSION#v}"
-          GITOPS_FILE="${{ inputs.gitops-file }}"
-          GITOPS_FILE="${GITOPS_FILE:-${{ inputs.ecr-repository }}}"
-          git clone "https://x-access-token:${GITOPS_TOKEN}@github.com/grocers-io/gitops.git"
+          GITOPS_FILES="${{ inputs.gitops-file }}"
+          GITOPS_FILES="${GITOPS_FILES:-${{ inputs.ecr-repository }}}"
+          git clone --branch main-grocers "https://x-access-token:${GITOPS_TOKEN}@github.com/grocers-io/gitops.git"
           cd gitops
-          sed -i "s/tag: .*/tag: \"$VERSION\"/" apps/us-east-1/${{ inputs.gitops-env }}/$GITOPS_FILE.yaml
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git config user.name "github-actions[bot]"
-          git add apps/us-east-1/${{ inputs.gitops-env }}/$GITOPS_FILE.yaml
-          git commit -m "chore: update $GITOPS_FILE to $VERSION [skip ci]"
-          git pull --rebase origin main
+          for GITOPS_FILE in $GITOPS_FILES; do
+            MANIFEST="apps/us-east-1/${{ inputs.gitops-env }}/$GITOPS_FILE.yaml"
+            sed -i "s/tag: .*/tag: \"$VERSION\"/" "$MANIFEST"
+            git add "$MANIFEST"
+          done
+          git commit -m "chore: update $GITOPS_FILES to $VERSION [skip ci]"
+          git pull --rebase origin main-grocers
           git push
